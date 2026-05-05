@@ -486,3 +486,715 @@ CONCEPT 6: Embedded Systems, RTOS, HPC, Real vs Protected Mode
 ```
 
 Shall I continue with Concept 5 next? (That one has the architectural diagram from slide 11 which I'll walk through carefully.) Or would you like to pause and ask questions on concepts 1–4 first?
+
+
+# CONCEPT 5: Monolithic vs Microkernel Architecture
+
+## Core Idea
+
+Every OS has a kernel — the privileged core that manages hardware, memory, processes, and everything else. But there's a fundamental design question:
+
+**How much code should live inside the kernel?**
+
+Two philosophies answer this differently:
+
+```
+Monolithic Kernel → "Put everything in the kernel"
+Microkernel       → "Put only the bare minimum in the kernel"
+```
+
+This isn't just an academic debate. The choice affects performance, stability, security, and maintainability of the entire OS.
+
+---
+
+## What is a Kernel, Really? — First Principles
+
+Before comparing the two, you need to understand why the kernel exists at all.
+
+The kernel exists because hardware is dangerous and shared. If every program could directly talk to the CPU, memory controller, disk, and network card — chaos. One buggy program could corrupt another's memory, crash the disk, or starve everyone else of CPU.
+
+So the hardware enforces two privilege levels:
+
+```
+Kernel Mode (Ring 0)
+  → Unrestricted access to all hardware
+  → Can execute any instruction
+  → Can access any memory address
+  → Where the OS kernel runs
+
+User Mode (Ring 3)
+  → Restricted. Cannot directly touch hardware.
+  → Cannot access kernel memory
+  → Must ask the kernel for services via system calls
+  → Where your programs run
+```
+
+The kernel is the gatekeeper sitting in kernel mode, serving everyone in user mode. The question is: **what exactly goes inside this gatekeeper?**
+
+---
+
+## Monolithic Kernel — Deep Explanation
+
+### What it means
+
+"Monolithic" literally means "one large stone." In OS terms, it means the entire OS functionality is compiled into **one single large binary** running entirely in kernel mode.
+
+What lives in a monolithic kernel:
+
+```
++--------------------------------------------------+
+|              KERNEL MODE (Ring 0)                |
+|                                                  |
+|   Process Management    Memory Management        |
+|   Filesystem (ext4,     IPC (pipes, sockets,     |
+|    FAT, etc.)            semaphores)             |
+|   Device Drivers        Network Stack            |
+|   Scheduler             System Calls             |
+|                                                  |
++--------------------------------------------------+
+               Hardware
+```
+
+All of these components run in the same address space, with the same privilege level. They can call each other's functions directly — like calling a regular function in C. No overhead, no message passing, no copying data across boundaries.
+
+Examples: **Linux, traditional UNIX, Windows (old versions)**
+
+### Why it's fast
+
+When the filesystem needs to talk to the memory manager, it's just a function call:
+
+```
+filesystem_code() {
+    page = memory_manager_get_page();  // direct call, no overhead
+}
+```
+
+No context switch. No copying data. No waiting. Just a function call at full CPU speed.
+
+### The Fatal Flaw
+
+Every component runs with the same privilege and in the same address space. This means:
+
+```
+One bug in a device driver
+         ↓
+Can corrupt kernel memory
+         ↓
+Entire system crashes
+         ↓
+You see: Kernel Panic / Blue Screen of Death
+```
+
+In Linux, most kernel panics come from buggy device drivers — third party code running with the same privilege as the core kernel. One bad pointer dereference in a WiFi driver can bring down the whole system.
+
+---
+
+## Microkernel — Deep Explanation
+
+### What it means
+
+The microkernel philosophy says: **the kernel should only contain what absolutely cannot be in user space.**
+
+What truly must be in the kernel:
+
+```
++--------------------------------------------------+
+|         MICRO KERNEL MODE (Ring 0) — tiny        |
+|                                                  |
+|   Interrupt Handling    Basic Scheduling         |
+|   Address Space Mgmt    Basic IPC primitives     |
+|   Hardware Abstraction                           |
+|                                                  |
++--------------------------------------------------+
+```
+
+Everything else becomes a **user-space service (server)**:
+
+```
++--------------------------------------------------+
+|                  USER MODE                       |
+|                                                  |
+|  [File Server]  [Network Server]  [Driver Server]|
+|  [Memory Mgr]   [Process Server]  [Display Srvr] |
+|                                                  |
+|  These are just regular processes — privileged   |
+|  user processes, but user mode nonetheless.      |
++--------------------------------------------------+
+               ↕ IPC (message passing)
++--------------------------------------------------+
+|              MICROKERNEL                         |
++--------------------------------------------------+
+               Hardware
+```
+
+### The Diagram on Slide 11 — Explained
+
+The slide shows exactly this architecture. Let me walk through it:
+
+```
++---------------------------+  USER MODE
+|  Custom Module            |
+|  File Module              |  ← These are OS services
+|  Network Module           |     running as USER SPACE
+|  Device Driver Module     |     processes/servers
++---------------------------+
+         ↕    ↕    ↕
+      IPC  IPC  IPC         ← Processes communicate via
+         ↕    ↕    ↕           message passing through
++---------------------------+   the microkernel
+|      MICRO KERNEL         |  KERNEL MODE
+|  Interrupt Handler        |  ← Only essentials here
+|  Scheduler / FIFO         |
++---------------------------+
+         ↕
++---------------------------+
+|       HARDWARE            |
++---------------------------+
+```
+
+The arrows represent **IPC (Inter-Process Communication)** — specifically message passing. When your application needs a file read:
+
+```
+App → [IPC message: "read file X"] → File Server
+File Server → [IPC message: "need memory page"] → Memory Server
+Memory Server → [IPC reply: here's the page] → File Server
+File Server → [IPC reply: here's your data] → App
+```
+
+Every interaction crosses a user/kernel boundary at least twice (to send and receive). This is the overhead cost.
+
+### The Big Advantage
+
+```
+File Server crashes?
+         ↓
+It's just a user-space process dying
+         ↓
+Restart the File Server
+         ↓
+Rest of system keeps running fine
+```
+
+No kernel panic. The kernel itself never crashed — it was just a service. This is why microkernels are attractive for **safety-critical systems** (medical devices, aircraft control, etc.).
+
+---
+
+## Pros and Cons — Side by Side
+
+```
++-------------------+------------------------+------------------------+
+| Aspect            | Monolithic             | Microkernel            |
++-------------------+------------------------+------------------------+
+| Architecture      | One big kernel binary  | Tiny kernel +          |
+|                   |                        | user-space servers     |
++-------------------+------------------------+------------------------+
+| Performance       | HIGH — direct          | LOWER — IPC overhead   |
+|                   | function calls         | for every service call  |
++-------------------+------------------------+------------------------+
+| Stability         | One bug can crash      | Bug in a service =      |
+|                   | entire system          | restart that service    |
++-------------------+------------------------+------------------------+
+| Security          | Kernel bug =           | Isolation between       |
+|                   | total compromise       | services limits damage  |
++-------------------+------------------------+------------------------+
+| Driver issues     | Buggy driver brings    | Buggy driver = restart  |
+|                   | down whole system      | driver process          |
++-------------------+------------------------+------------------------+
+| Development       | Easier — everything    | Harder — must design    |
+|                   | can talk directly      | explicit IPC interfaces  |
++-------------------+------------------------+------------------------+
+| Modularity        | Harder — tightly       | Natural — services are  |
+|                   | coupled code           | separate processes       |
++-------------------+------------------------+------------------------+
+| Examples          | Linux, old UNIX        | MINIX, QNX, seL4,      |
+|                   |                        | Mach                    |
++-------------------+------------------------+------------------------+
+```
+
+---
+
+## The Real World Compromise — Hybrid Kernels
+
+The slide points this out explicitly. Pure microkernels are slow. Pure monolithic kernels are fragile. The industry landed on a middle ground: **Hybrid Kernels**.
+
+```
+Hybrid Kernel = Monolithic structure
+              + Microkernel ideas (modularity, some isolation)
+```
+
+**Windows NT / Windows 10/11:**
+Architecturally inspired by microkernels (has an Executive, separate subsystems), but runs most components in kernel mode for performance. Often called hybrid.
+
+**macOS / XNU kernel:**
+XNU = X is Not UNIX. It combines:
+- Mach microkernel (for IPC, virtual memory, scheduling)
+- BSD layer (for POSIX, filesystem, networking) — runs in kernel mode
+
+So macOS literally has a microkernel (Mach) at its core, but layers BSD on top of it in kernel mode for performance. True hybrid.
+
+```
+macOS XNU Architecture:
+
++--------------------------------+  User Mode
+|  Applications                  |
+|  BSD System Call Interface     |
++--------------------------------+
+|  BSD (networking, FS, POSIX)   |  ← In kernel mode (for speed)
+|  I/O Kit (drivers)             |  ← In kernel mode
++--------------------------------+
+|  Mach Microkernel              |  ← The actual microkernel core
+|  (IPC, VM, Scheduling)         |
++--------------------------------+
+          Hardware
+```
+
+---
+
+# CONCEPT 6: Functionally Different OS Types
+
+## Core Idea
+
+So far everything we've studied assumes a general purpose OS — one OS that handles everything for everyone. But not all computing environments are general purpose. Different problems demand different OS designs.
+
+The slide identifies three special categories:
+
+```
+1. Embedded Systems and Real-Time OS (RTOS)
+2. High Performance Computing (HPC) OS
+3. Real vs Protected Mode (hardware background)
+```
+
+---
+
+## Part A: Embedded Systems
+
+### What is an embedded system?
+
+An embedded system is a computer **built into a device** to do **one specific job**:
+
+```
+Pacemaker           → control heartbeat timing
+Anti-lock brakes    → detect wheel lock, release brake
+Reactor control     → monitor temperature, open/close valves
+Industrial robot    → move arm to exact coordinates
+Washing machine     → control motor, water, timing
+```
+
+These are not general-purpose computers. You don't browse Reddit on a pacemaker.
+
+### Why early embedded systems had NO OS
+
+The slide makes an important historical point:
+
+Early embedded systems skipped the OS entirely. Why?
+
+```
+A general purpose OS provides:
+  - Scheduler    → overhead
+  - Filesystem   → overhead + storage you don't need
+  - IPC          → overhead
+  - Networking   → often not needed
+  - Memory mgmt  → overhead
+
+For a pacemaker that does ONE thing on a loop:
+  All of this is pure waste.
+```
+
+Programmers just wrote bare-metal C code that ran directly on the microcontroller:
+
+```c
+while(1) {
+    read_sensor();
+    if (heart_rate < threshold) {
+        send_pulse();
+    }
+    wait_microseconds(100);
+}
+```
+
+No OS. No scheduler. One infinite loop. Fast, predictable, tiny.
+
+### The Real-Time Problem
+
+**Real-time** doesn't mean "very fast." It means **meeting a deadline.**
+
+```
+Hard Real-Time:
+  Missing the deadline = system failure
+  Example: Pacemaker must fire within 50ms.
+           If it fires at 51ms, the patient may die.
+           Lateness = catastrophe.
+
+Soft Real-Time:
+  Missing the deadline = degraded quality, not catastrophe
+  Example: Video player must decode a frame every 33ms.
+           Missing one frame = slight stutter. Not ideal, but ok.
+```
+
+**Why does a GPOS (like Linux/Windows) fail real-time requirements?**
+
+```
+Round-robin scheduling optimizes AVERAGE turnaround time.
+
+Thread A needs to run RIGHT NOW (deadline = 2ms from now)
+But the scheduler says: "sorry, Thread B has been waiting longer"
+Thread A misses its deadline.
+                ↑
+          UNACCEPTABLE in hard real-time
+```
+
+A GPOS makes no guarantees about when exactly your thread will run. It's fair, but not predictable.
+
+---
+
+## Part B: Real-Time Operating System (RTOS)
+
+### What changed
+
+As embedded systems grew more complex — multiple sensors, multiple actuators, synchronization between them — you couldn't get away with a single infinite loop anymore. You needed threads, synchronization, and some structure. But you couldn't use a GPOS. So RTOS was born.
+
+### What makes an RTOS different
+
+```
++---------------------------+---------------------------+
+| GPOS (Linux/Windows)      | RTOS (FreeRTOS/Contiki)   |
++---------------------------+---------------------------+
+| Optimizes average         | Guarantees deadlines for  |
+| throughput/fairness       | individual tasks          |
++---------------------------+---------------------------+
+| Scheduler is opaque       | Programmer controls       |
+|                           | scheduling directly       |
++---------------------------+---------------------------+
+| Large memory footprint    | Can run in kilobytes of   |
+|                           | RAM                       |
++---------------------------+---------------------------+
+| Many features             | Only what you need        |
++---------------------------+---------------------------+
+| Context switch takes      | Context switch is fast    |
+| variable time             | and bounded               |
++---------------------------+---------------------------+
+```
+
+### Key RTOS features
+
+**Priority-based preemptive scheduling:**
+Every task has a fixed priority. The highest priority task that is ready to run ALWAYS runs immediately. Period. No round-robin fairness. The scheduler is deterministic.
+
+```
+Task A: priority 1 (lowest) — background logging
+Task B: priority 5 (medium) — sensor reading
+Task C: priority 10 (highest) — emergency stop
+
+If Task C becomes ready → it IMMEDIATELY preempts A and B.
+No waiting. No "your turn will come." Immediately.
+```
+
+**Bounded execution times:**
+Every OS operation (context switch, semaphore acquire, memory allocation) is guaranteed to complete within a known maximum time. This is what lets you reason about deadlines mathematically.
+
+**Examples mentioned:**
+- **FreeRTOS** — runs on microcontrollers with as little as 4KB RAM. Extremely popular in industry.
+- **Contiki OS** — designed for tiny IoT devices, wireless sensor networks.
+
+---
+
+## Part C: HPC — High Performance Computing OS
+
+The slide only mentions this as a category without detailed content (slide 16 is a section header with no bullets). But for completeness:
+
+HPC systems are the opposite extreme from embedded — massive clusters (thousands of CPUs/GPUs) solving scientific problems like weather simulation, protein folding, nuclear simulation.
+
+The OS concerns here are different:
+
+```
+- Minimize OS jitter (random latency from OS interrupts)
+- Specialized schedulers for parallel jobs (MPI, OpenMP)
+- High-speed interconnects (InfiniBand not TCP/IP)
+- Optimized memory hierarchy (NUMA awareness)
+- Often runs stripped-down Linux kernels
+```
+
+The slide doesn't go deep here — just flags it as a category of OS specialization.
+
+---
+
+## Part D: Real Mode vs Protected Mode (Slide 18)
+
+This slide is about **CPU hardware modes** — the foundation that makes everything we've studied possible.
+
+### Real Mode — The Old World
+
+Real Mode is the CPU mode Intel x86 processors boot into. It's a relic of the original 8086 CPU (1978).
+
+```
+Properties of Real Mode:
+  - 20-bit address bus → can address only 2^20 = 1MB of RAM
+  - Addresses are "real" — what you write IS the physical address
+  - Segmented addressing (CS:IP, DS:SI etc.) but still real physical addresses
+  - NO privilege levels — all code runs with full hardware access
+  - NO memory protection — any program can read/write anywhere
+  - NO virtual memory
+  - NO kernel/user mode distinction
+```
+
+In Real Mode, any program can do anything:
+
+```
+Write to address 0x00000 → could overwrite the interrupt table → crash
+Write to another program's memory → corruption
+Access hardware directly → chaos
+```
+
+This is why DOS programs could crash the entire system — they ran in Real Mode with no protection.
+
+### Protected Mode — The Modern World
+
+Protected Mode is what modern OS kernels switch into immediately after booting.
+
+```
+Properties of Protected Mode:
+  - 32-bit addressing → 4GB addressable memory (or 64-bit for even more)
+  - Virtual addresses → MMU translates to physical (programs think
+                         they have exclusive memory)
+  - Privilege rings (Ring 0 = kernel, Ring 3 = user)
+  - Memory protection → processes cannot access each other's memory
+  - Segmentation + Paging — full virtual memory system
+  - Hardware-enforced isolation
+```
+
+Everything we've talked about — kernel mode, user mode, page faults, memory protection, process isolation — **all of it requires Protected Mode**. It's the hardware foundation.
+
+### The Boot Sequence in Brief
+
+```
+CPU powers on
+     ↓
+Starts in Real Mode (16-bit, 1MB, no protection)
+     ↓
+BIOS/UEFI runs (in Real Mode)
+     ↓
+Bootloader (GRUB etc.) loads kernel (in Real Mode)
+     ↓
+Kernel immediately sets up GDT (Global Descriptor Table)
+and switches CPU to Protected Mode
+     ↓
+Now the kernel has: rings, paging, memory protection
+     ↓
+Everything we've studied all semester takes effect
+```
+
+The slide flags this as background context — understanding WHY modern OS features exist requires knowing that the hardware had to evolve to support them.
+
+---
+
+# BIG PICTURE — How Everything Connects
+
+```
+HARDWARE FOUNDATION
+  Real Mode → Protected Mode
+       ↓
+  Rings (0/3) → Kernel Mode / User Mode
+       ↓
+KERNEL DESIGN
+  What lives in kernel mode?
+  Monolithic → everything in kernel (fast, fragile)
+  Microkernel → minimum in kernel (stable, slower)
+  Hybrid → best of both (Windows NT, macOS XNU)
+       ↓
+PROCESS MODEL
+  Session → Process Groups → Processes
+  Session controls terminal, job control, signals
+  PGID enables group signaling (Ctrl+C kills whole job)
+       ↓
+RESOURCE MANAGEMENT
+  Permission security (rwx) +
+  Limit-based security (ulimit/getrlimit)
+  Usage tracking (getrusage)
+  System constants (sysconf)
+       ↓
+TIME
+  Real / User / System — three independent measurements
+  alarm / setitimer — notify via signals when time elapses
+  cron — schedule work at the OS level, every minute
+       ↓
+SPECIAL PURPOSE OS
+  GPOS → general use, optimizes average metrics
+  RTOS → hard deadlines, deterministic scheduling
+  Embedded → minimal/no OS, bare metal for simple tasks
+  HPC → eliminate jitter, maximize parallelism
+```
+
+---
+
+# ONE-PAGE CHEAT SHEET
+
+```
+PROCESS HIERARCHY
+  Session (SID) > Process Group (PGID) > Process (PID)
+  Session Leader = shell. SID = shell's PID.
+  PGID = PID of group leader.
+  STAT 's' = session leader. STAT '+' = foreground group.
+  Only foreground group gets terminal input + Ctrl+C signal.
+
+RESOURCE LIMITS
+  getrlimit()  → soft limit (current) + hard limit (ceiling)
+  getrusage()  → actual usage counters (CPU, page faults, etc.)
+  sysconf()    → system-wide constants (page size, max path, etc.)
+  ulimit -a    → shell command to see current process limits
+
+TIME
+  Real time    = wall clock. Includes everything. Always largest.
+  User time    = CPU in your code (user mode only)
+  System time  = CPU in kernel on your behalf (syscalls)
+  Real >= User + System  always.
+
+TIMERS
+  alarm(n)           → SIGALRM after n real seconds
+  ITIMER_REAL        → counts wall clock time → SIGALRM
+  ITIMER_VIRTUAL     → counts user time only → SIGVTALRM
+  ITIMER_PROF        → counts user+system time → SIGPROF
+  PROF ≠ REAL. Prof pauses when sleeping. Real never pauses.
+
+CRON
+  Daemon. Wakes every minute. Reads /etc/crontab.
+  Format: min hour dom month dow   command
+  * = every. Minimum resolution = 1 minute.
+
+KERNEL ARCHITECTURES
+  Monolithic  = all in kernel. Fast. One bug = system crash.
+  Microkernel = tiny kernel + user-space services. Stable. Slow.
+  Hybrid      = both ideas. Windows NT, macOS XNU.
+
+RTOS vs GPOS
+  GPOS = fair, average-optimized, unpredictable timing
+  RTOS = priority-based, deadline-guaranteed, small footprint
+  Hard RT = miss deadline = failure. Soft RT = miss = degraded.
+  FreeRTOS, Contiki = RTOS examples.
+
+REAL vs PROTECTED MODE
+  Real Mode    = no protection, no rings, 1MB, legacy
+  Protected    = rings 0/3, virtual memory, isolation, paging
+  CPU boots in Real Mode → kernel immediately switches to Protected
+```
+
+---
+
+# PRACTICE SECTION
+
+## Theory Questions
+
+**Q1.** You run this in your shell:
+```bash
+$ ./server &
+$ ./client | ./logger
+```
+Draw the session/process group hierarchy. Which group is foreground? Which is background? What happens when you press Ctrl+C?
+
+**Answer:**
+```
+SESSION (SID = bash's PID)
+├── bash — background, session leader (STAT: Ss)
+├── server — background, own group (STAT: R)
+└── client + logger — FOREGROUND group (STAT: S+)
+     ├── client (group leader, PGID = client's PID)
+     └── logger
+
+Ctrl+C sends SIGINT to the FOREGROUND group only.
+→ client and logger are killed.
+→ server keeps running (it's background, different group).
+→ bash keeps running (session leader, different group).
+```
+
+---
+
+**Q2.** A programmer says: "My program ran for 10 seconds real time but only 0.5s user + 0.2s system. The remaining 9.3 seconds must be wasted — I should optimize my algorithm."
+
+Is this reasoning correct? What is actually happening and what should they investigate?
+
+**Answer:**
+The reasoning is wrong. The algorithm is NOT the bottleneck.
+
+```
+Real time = 10s
+CPU time  = user + system = 0.5 + 0.2 = 0.7s
+CPU usage = 0.7/10 = 7%
+
+93% of the time, the process was NOT using CPU at all.
+This is the signature of an I/O-bound or blocking program.
+```
+
+The process was likely: waiting for network/disk I/O, sleeping, waiting for another process, or blocked on a lock. Optimizing the algorithm changes the 0.7s — irrelevant when 9.3s is the problem. Investigate: disk speed, network latency, unnecessary sleep() calls, lock contention.
+
+---
+
+**Q3.** Why does a GPOS like Linux fail for a pacemaker, but an RTOS like FreeRTOS work? What specific property of the GPOS is the problem?
+
+**Answer:**
+The problem is **non-deterministic scheduling.** A GPOS scheduler (like Linux's CFS — Completely Fair Scheduler) optimizes for fairness and average throughput. It cannot guarantee that any specific thread will run within any specific time bound.
+
+A pacemaker needs to fire an electrical pulse within a guaranteed window (say, 50ms after detecting an arrhythmia). If Linux decides another process has higher priority or the system is under load, the pacemaker thread could be delayed 100ms — potentially fatal.
+
+An RTOS uses **fixed-priority preemptive scheduling**: the pacemaker task has the highest priority, so whenever it's ready, it runs IMMEDIATELY, preempting everything else. The context switch time is bounded and known. The deadline can be mathematically guaranteed.
+
+---
+
+## Code Tracing / Reasoning Questions
+
+**Q4.** A process sets:
+```c
+setitimer(ITIMER_VIRTUAL, &tv, NULL);  // 5 second timer
+```
+The process then calls `sleep(10)`. Does the timer fire after 5 seconds of wall clock time? Why or why not?
+
+**Answer:**
+**No.** `ITIMER_VIRTUAL` only counts time the process spends in **user mode**. During `sleep(10)`, the process is blocked — it is not running at all. The virtual timer does not tick while the process sleeps.
+
+After `sleep(10)` returns, the process must accumulate 5 more seconds of actual user-mode CPU time before the timer fires. If the process does very little computation, this timer might take hours of real time to fire.
+
+If you want a timer that fires after 5 real seconds regardless — use `ITIMER_REAL` or `alarm(5)`.
+
+---
+
+**Q5.** You have a monolithic kernel. A third-party WiFi driver has a buffer overflow bug. Trace exactly what happens from the bug to the system crash. Then explain how a microkernel design would handle the same bug differently.
+
+**Answer:**
+
+**Monolithic kernel — crash path:**
+```
+WiFi driver code runs in kernel mode (Ring 0)
+      ↓
+Buffer overflow → writes past its buffer
+      ↓
+Overwrites adjacent kernel memory (maybe another
+driver's data, or the scheduler's data structures)
+      ↓
+Kernel reads corrupted data → executes garbage
+      ↓
+Invalid memory access or illegal instruction
+      ↓
+KERNEL PANIC — entire system halts
+      ↓
+Hard reboot required. All processes lost.
+```
+
+**Microkernel — same bug:**
+```
+WiFi driver runs as a USER-SPACE service (Ring 3)
+      ↓
+Buffer overflow → writes past its buffer
+      ↓
+MMU enforces address space boundaries
+      ↓
+Write to invalid address → SIGSEGV
+      ↓
+WiFi driver process crashes (just that process)
+      ↓
+Microkernel detects service crash
+      ↓
+Restarts the WiFi driver service
+      ↓
+Brief WiFi outage, then recovery.
+Rest of system: completely unaffected.
+```
+
+The key difference: **hardware-enforced isolation**. In a monolithic kernel, a driver's bug has kernel-level blast radius. In a microkernel, its blast radius is limited to that one user-space process.
