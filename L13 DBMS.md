@@ -1147,7 +1147,7 @@ This is the **lost update problem**. Both transactions read N simultaneously, co
 Want me to add more practice questions or go deeper on any specific topic?
 
 
-So say if 1ulti sub part question can come for an exam or an sub part of an question , an question that must require deep level knowledge, then what should I recall and think ? Give an questions nd explain
+# So say if 1ulti sub part question can come for an exam or an sub part of an question , an question that must require deep level knowledge, then what should I recall and think ? Give an questions nd explain
 
 # Deep Exam Question — Full Walkthrough
 
