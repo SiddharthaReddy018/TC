@@ -1,3 +1,42 @@
+PHYSICAL DISK (/dev/sdb)
+┌─────────────────────────────────────────────────────────────────────┐
+│ Sector 0                                                            │
+│ ┌───────────────────────────────────────────────────────────────┐  │
+│ │  MBR  (Master Boot Record)                                    │  │
+│ │  ├── Boot code (used when booting OS)                         │  │
+│ │  └── Partition Table                                          │  │
+│ │        ├── Partition 1: starts at sector X, size Y → /dev/sdb1│  │
+│ │        ├── Partition 2: starts at sector A, size B → /dev/sdb2│  │
+│ │        └── Partition 3: ...                    → /dev/sdb3   │  │
+│ └───────────────────────────────────────────────────────────────┘  │
+│                                                                     │
+│  ┌──────────────────────────────┐  ┌───────────────┐  ┌─────────┐  │
+│  │   PARTITION 1 (/dev/sdb1)    │  │  PARTITION 2  │  │  PAR 3  │  │
+│  │                              │  │               │  │         │  │
+│  │  Sector 0 of partition:      │  │  ...          │  │  ...    │  │
+│  │  ┌────────────────────────┐  │  │               │  │         │  │
+│  │  │  VBR (Volume Boot      │  │  │               │  │         │  │
+│  │  │  Record / partition    │  │  │               │  │         │  │
+│  │  │  boot sector)          │  │  │               │  │         │  │
+│  │  └────────────────────────┘  │  │               │  │         │  │
+│  │                              │  │               │  │         │  │
+│  │  EXT2 FILESYSTEM:            │  │               │  │         │  │
+│  │  ┌──────────────────────┐    │  │               │  │         │  │
+│  │  │  Block Group 0       │    │  │               │  │         │  │
+│  │  │  ┌──┬──┬──┬──┬──┬──┐│    │  │               │  │         │  │
+│  │  │  │SB│GD│IB│BB│IT│Data││   │  │               │  │         │  │
+│  │  │  └──┴──┴──┴──┴──┴──┘│    │  │               │  │         │  │
+│  │  ├──────────────────────┤    │  │               │  │         │  │
+│  │  │  Block Group 1       │    │  │               │  │         │  │
+│  │  │  ┌──┬──┬──┬──┬──┬──┐│    │  │               │  │         │  │
+│  │  │  │SB│GD│IB│BB│IT│Data││   │  │               │  │         │  │
+│  │  │  └──┴──┴──┴──┴──┴──┘│    │  │               │  │         │  │
+│  │  ├──────────────────────┤    │  │               │  │         │  │
+│  │  │  Block Group 2 ...   │    │  │               │  │         │  │
+│  │  └──────────────────────┘    │  │               │  │         │  │
+│  └──────────────────────────────┘  └───────────────┘  └─────────┘  │
+└─────────────────────────────────────────────────────────────────────┘
+
 Great — I have the full content extracted. This is a **dense, multi-concept slide deck** on IPC (Inter-Process Communication). Given how much ground it covers, I'll teach it **concept by concept in parts** so nothing gets compressed. Let me start with **Part 1**.
 
 ---
